@@ -1,0 +1,9 @@
+.venv/
+build/
+dist/
+*.egg-info/
+__pycache__/
+.DS_Store
+icons/forge-worker-1024.png
+icons/*.iconset/
+.env

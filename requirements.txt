@@ -1,0 +1,5 @@
+# Forge Worker Menu Bar App — Python dependencies
+rumps>=0.4.0
+supabase>=2.0.0
+psutil>=5.9.0
+python-dotenv>=1.0.0
