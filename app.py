@@ -330,14 +330,22 @@ class ForgeWorkerApp(rumps.App):
         active_account = cfg.get("active_account", "")
 
         if active_account:
-            self.menu.add(rumps.MenuItem(f"🤖  Claude: {active_account}", callback=None))
+            # Find the active account details
+            active = next((a for a in accounts if a["name"] == active_account), None)
+            badge  = " Max Pro" if active and active.get("type") == "max_pro" else ""
+            email  = active.get("account_email", "") if active else ""
+            label  = email if email else active_account
+            self.menu.add(rumps.MenuItem(f"🤖  Claude{badge}: {label}", callback=None))
         else:
             self.menu.add(rumps.MenuItem("🤖  Claude: not configured", callback=self._add_account))
 
         if len(accounts) > 1:
-            switch_menu = rumps.MenuItem("Switch Account")
+            switch_menu = rumps.MenuItem("Switch Claude Account")
             for acc in accounts:
-                label = f"{'✓ ' if acc['name'] == active_account else '   '}{acc['name']}"
+                is_active = acc["name"] == active_account
+                badge     = " ★" if acc.get("type") == "max_pro" else ""
+                disp      = acc.get("account_email") or acc["name"]
+                label     = f"{'✓ ' if is_active else '   '}{disp}{badge}"
                 switch_menu[label] = rumps.MenuItem(
                     label, callback=lambda _, a=acc: self._switch_account(a)
                 )
@@ -456,13 +464,58 @@ class ForgeWorkerApp(rumps.App):
         if account.get("api_key"):
             os.environ["ANTHROPIC_API_KEY"] = account["api_key"]
         _save_config(cfg)
-        rumps.notification("Forge Worker", "Account Switched", f"Now using: {account['name']}")
+        display = account.get("account_email") or account["name"]
+        # For Max Pro accounts, workers inherit the logged-in claude CLI session —
+        # no env var needed, just tracking which account is "active" in config.
+        if account.get("type") == "max_pro":
+            rumps.notification("Forge Worker", "Account Switched", f"Active: {display}\nWorkers will use whichever claude CLI session is logged in on this machine.")
+        else:
+            rumps.notification("Forge Worker", "Account Switched", f"Now using: {display}")
         self._refresh_menu(None)
 
     def _add_account(self, _):
-        r = rumps.Window(
-            message="Account name (e.g. 'HB Production'):",
+        # Ask: Max Pro (subscription) or API key?
+        r = rumps.alert(
             title="Add Claude Account",
+            message="What type of Claude account?",
+            ok="Claude Max Pro (subscription)",
+            cancel="API Key",
+            other="Cancel",
+        )
+        # rumps.alert: ok=1, cancel=0, other=-1
+        if r == -1:
+            return
+        if r == 1:
+            self._add_max_pro_account()
+        else:
+            self._add_api_key_account()
+
+    def _add_max_pro_account(self):
+        r = rumps.Window(
+            message="Enter the email address for this Claude Max Pro account:",
+            title="Add Claude Max Pro Account",
+            default_text="",
+            ok="Save",
+            cancel="Cancel",
+            dimensions=(360, 24),
+        ).run()
+        if not r.clicked or not r.text.strip():
+            return
+        email = r.text.strip()
+        name  = email
+        cfg   = _load_config()
+        accounts = [a for a in cfg.get("claude_accounts", []) if a.get("account_email") != email]
+        accounts.append({"name": name, "account_email": email, "type": "max_pro"})
+        cfg["claude_accounts"] = accounts
+        cfg["active_account"]  = name
+        _save_config(cfg)
+        rumps.notification("Forge Worker", "Account Added", f"Max Pro: {email}\nMake sure you're logged in via: claude login")
+        self._refresh_menu(None)
+
+    def _add_api_key_account(self):
+        r = rumps.Window(
+            message="Account name:",
+            title="Add API Key Account",
             default_text="",
             ok="Next",
             cancel="Cancel",
@@ -474,7 +527,7 @@ class ForgeWorkerApp(rumps.App):
 
         r2 = rumps.Window(
             message=f"Anthropic API key for '{name}':",
-            title="Add Claude Account",
+            title="Add API Key Account",
             default_text="sk-ant-...",
             ok="Save",
             cancel="Cancel",
@@ -489,7 +542,7 @@ class ForgeWorkerApp(rumps.App):
 
         cfg      = _load_config()
         accounts = [a for a in cfg.get("claude_accounts", []) if a["name"] != name]
-        accounts.append({"name": name, "api_key": api_key})
+        accounts.append({"name": name, "api_key": api_key, "type": "api_key"})
         cfg["claude_accounts"] = accounts
         cfg["active_account"]  = name
         os.environ["ANTHROPIC_API_KEY"] = api_key
